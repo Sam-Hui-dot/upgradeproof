@@ -1,6 +1,8 @@
 /upgradeproof
+/dist/
 /.upgradeproof/
 /fixtures/*/.artifacts/
+/fixtures/*/.action-artifacts-*/
 *.exe
 *.test
 coverage.out

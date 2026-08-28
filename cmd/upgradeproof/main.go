@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/Sam-Hui-dot/upgradeproof/internal/command"
@@ -23,6 +25,33 @@ var (
 	commit  = "unknown"
 	date    = "unknown"
 )
+
+func init() {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	version, commit, date = metadataFromBuildInfo(version, commit, date, info)
+}
+
+func metadataFromBuildInfo(currentVersion, currentCommit, currentDate string, info *debug.BuildInfo) (string, string, string) {
+	if currentVersion == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		currentVersion = info.Main.Version
+	}
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			if currentCommit == "unknown" && setting.Value != "" {
+				currentCommit = setting.Value
+			}
+		case "vcs.time":
+			if currentDate == "unknown" && setting.Value != "" {
+				currentDate = setting.Value
+			}
+		}
+	}
+	return currentVersion, currentCommit, currentDate
+}
 
 func main() { os.Exit(run(os.Args[1:])) }
 
@@ -67,8 +96,17 @@ func runValidate(args []string) int {
 		states := append([]config.ReleaseState{path.From}, path.Via...)
 		states = append(states, path.To)
 		for i, state := range states {
-			if _, err := client.Validate(ctx, state.Env); err != nil {
-				if safety.IsViolation(err) {
+			if state.Build != nil {
+				state.Env = cloneEnvironment(state.Env)
+				state.Env[state.Build.TagEnv] = "upgradeproof-target-validation"
+			}
+			model, validateErr := client.Validate(ctx, state.Env)
+			if validateErr == nil {
+				validateErr = engine.ValidateBuildOwnership(state, model, "validation")
+			}
+			if validateErr != nil {
+				err := validateErr
+				if safety.IsViolation(err) || errors.Is(err, engine.ErrInvalidBuildTarget) {
 					fmt.Fprintf(os.Stderr, "validation failed for path %q state %d: %v\n", path.Name, i, err)
 					return engine.ExitPreflight
 				}
@@ -79,6 +117,14 @@ func runValidate(args []string) int {
 	}
 	fmt.Printf("configuration valid: %d path(s), Compose release states resolved and audited\n", len(cfg.Paths))
 	return engine.ExitPassed
+}
+
+func cloneEnvironment(env map[string]string) map[string]string {
+	copyEnv := make(map[string]string, len(env))
+	for key, value := range env {
+		copyEnv[key] = value
+	}
+	return copyEnv
 }
 
 func runTest(args []string) int {

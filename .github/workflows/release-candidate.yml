@@ -1,0 +1,102 @@
+name: release-candidate
+
+on:
+  push:
+    branches:
+      - main
+      - codex/v0.1.0-rc
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build release-candidate archives
+        run: bash scripts/build-release.sh v0.1.0
+      - name: Verify every SHA256 checksum
+        working-directory: dist
+        run: sha256sum --check checksums.txt
+      - name: Start packaged CLI and verify version metadata
+        run: |
+          mkdir release-smoke
+          tar -xzf dist/upgradeproof_v0.1.0_linux_amd64.tar.gz -C release-smoke
+          test "$(release-smoke/upgradeproof version | cut -d' ' -f2)" = "v0.1.0"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upgradeproof-v0.1.0-rc-artifacts
+          path: dist/*
+          if-no-files-found: error
+
+  action-self-test:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: upgradeproof-v0.1.0-rc-artifacts
+          path: rc-dist
+      - name: Verify downloaded release-candidate artifacts
+        run: |
+          (cd rc-dist && sha256sum --check checksums.txt)
+      - name: Prepare Fixture A images
+        run: |
+          docker build -q -t upgradeproof-fixture-file:v1 --build-arg APP_VERSION=v1 fixtures/file-state/app >/dev/null
+          docker build -q -t upgradeproof-fixture-file:v2 --build-arg APP_VERSION=v2 fixtures/file-state/app >/dev/null
+      - name: Route fixed release URLs to the unpublished RC artifacts
+        run: |
+          chmod +x scripts/test-fake-curl.sh
+          mkdir action-test-bin
+          ln -s "$GITHUB_WORKSPACE/scripts/test-fake-curl.sh" action-test-bin/curl
+          echo "$GITHUB_WORKSPACE/action-test-bin" >> "$GITHUB_PATH"
+      - name: Action smoke - Fixture A
+        uses: ./
+        env:
+          UPGRADEPROOF_ACTION_TEST_ASSET_DIR: ${{ github.workspace }}/rc-dist
+        with:
+          config: fixtures/file-state/upgradeproof.yml
+          path: v1-via-v2-to-target
+          report-directory: .action-artifacts-a
+          keep-on-failure: "false"
+      - name: Assert Fixture A report exists and passed
+        run: python3 -c 'import glob,json; p=glob.glob("fixtures/file-state/.action-artifacts-a/*/report.json"); assert p; r=json.load(open(p[-1])); assert r["overall_status"] == "passed"'
+      - name: Prepare broken-upgrade source image
+        run: docker build -q -t upgradeproof-fixture-broken:v1 --build-arg BROKEN=0 fixtures/broken-upgrade/app >/dev/null
+      - name: Action smoke - broken upgrade detection
+        id: broken
+        continue-on-error: true
+        uses: ./
+        env:
+          UPGRADEPROOF_ACTION_TEST_ASSET_DIR: ${{ github.workspace }}/rc-dist
+        with:
+          config: fixtures/broken-upgrade/upgradeproof.yml
+          path: detects-broken-target
+          report-directory: .action-artifacts-b
+      - name: Assert broken upgrade was detected
+        env:
+          ACTION_OUTCOME: ${{ steps.broken.outcome }}
+        run: |
+          test "$ACTION_OUTCOME" = failure
+          python3 -c 'import glob,json; p=glob.glob("fixtures/broken-upgrade/.action-artifacts-b/*/report.json"); assert p; r=json.load(open(p[-1])); assert r["overall_status"] == "failed"; assert r["paths"][0]["checks"][0]["status"] == "failed"'
+      - name: Upload Action evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgradeproof-action-self-test-evidence
+          path: fixtures/*/.action-artifacts-*/
+          include-hidden-files: true
+          if-no-files-found: error

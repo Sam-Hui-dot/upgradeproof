@@ -1,0 +1,36 @@
+name: UpgradeProof
+description: Test a stateful Docker Compose upgrade path with UpgradeProof.
+author: Sam-Hui-dot
+
+inputs:
+  config:
+    description: Path to the UpgradeProof configuration file.
+    required: false
+    default: upgradeproof.yml
+  path:
+    description: Optional named upgrade path to execute.
+    required: false
+    default: ""
+  report-directory:
+    description: Directory for JSON, JUnit, hook output, and Compose evidence.
+    required: false
+    default: .upgradeproof
+  keep-on-failure:
+    description: Keep the failed Compose project and run-owned target images.
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install and run UpgradeProof
+      shell: bash
+      env:
+        UPGRADEPROOF_INPUT_CONFIG: ${{ inputs.config }}
+        UPGRADEPROOF_INPUT_PATH: ${{ inputs.path }}
+        UPGRADEPROOF_INPUT_REPORT_DIR: ${{ inputs.report-directory }}
+        UPGRADEPROOF_INPUT_KEEP: ${{ inputs.keep-on-failure }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/run-action.sh"
+
+branding:
+  icon: shield
+  color: blue

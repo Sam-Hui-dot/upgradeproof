@@ -17,6 +17,7 @@ import (
 	"github.com/Sam-Hui-dot/upgradeproof/internal/config"
 	"github.com/Sam-Hui-dot/upgradeproof/internal/health"
 	"github.com/Sam-Hui-dot/upgradeproof/internal/hooks"
+	"github.com/Sam-Hui-dot/upgradeproof/internal/report"
 )
 
 type engineRunner struct {
@@ -71,6 +72,11 @@ func (f *engineRunner) Run(_ context.Context, _ string, name string, args []stri
 		return command.Result{Stdout: []byte("example/app@sha256:digest\n")}, nil
 	}
 	if len(args) >= 3 && args[0] == "image" && args[1] == "rm" {
+		for _, removed := range f.removed {
+			if removed == args[2] {
+				return command.Result{Stderr: []byte("image already removed"), ExitCode: 1}, errors.New("exit status 1")
+			}
+		}
 		f.removed = append(f.removed, args[2])
 		return command.Result{}, nil
 	}
@@ -176,5 +182,53 @@ func TestProjectNameGeneration(t *testing.T) {
 func TestExitCodeSemantics(t *testing.T) {
 	if ExitPassed != 0 || ExitTestFailed != 1 || ExitPreflight != 2 || ExitInfrastructure != 3 {
 		t.Fatal("exit code contract changed")
+	}
+}
+
+func TestInvalidTargetBuildIsAConfigurationPreflightFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer server.Close()
+	cfg := releaseConfig(server.URL)
+	cfg.Paths[0].To.Build.Services = []string{"missing-service"}
+	runner := &engineRunner{}
+	root := t.TempDir()
+	executor := Engine{Config: cfg, Compose: compose.New(root, "compose.yml", runner), Hooks: hooks.Runner{CommandRunner: runner, RootDir: root}, Health: health.HTTPWaiter{}, Options: Options{RootDir: root, ReportDir: filepath.Join(root, "reports")}}
+	result, code := executor.Run(context.Background())
+	if code != ExitPreflight || result.OverallStatus != "preflight_failed" || len(runner.upTags) != 0 {
+		t.Fatalf("invalid target build was not rejected as config preflight: code=%d report=%+v up=%#v", code, result, runner.upTags)
+	}
+}
+
+func TestOwnedTargetImageCleanupReferencesAreDeduplicated(t *testing.T) {
+	got := uniqueStrings([]string{"example/shared:upgradeproof-target-run", "example/shared:upgradeproof-target-run", "example/api:upgradeproof-target-run"})
+	if len(got) != 2 || got[0] != "example/shared:upgradeproof-target-run" || got[1] != "example/api:upgradeproof-target-run" {
+		t.Fatalf("unexpected unique cleanup references: %#v", got)
+	}
+}
+
+func TestFinishPathRemovesSharedOwnedTargetImageOnce(t *testing.T) {
+	runner := &engineRunner{}
+	root := t.TempDir()
+	executor := Engine{Compose: compose.New(root, filepath.Join(root, "compose.yml"), runner)}
+	ref := "example/shared:upgradeproof-target-run"
+	result, code := executor.finishPath(context.Background(), "run", report.PathResult{
+		Status:            "passed",
+		ProjectName:       "upgradeproof-shared-image-run",
+		ArtifactDirectory: root,
+	}, ExitPassed, releaseStep{State: config.ReleaseState{Env: map[string]string{"APP_TAG": "upgradeproof-target-run"}}}, []string{ref, ref})
+	if code != ExitPassed || result.Status != "passed" {
+		t.Fatalf("duplicate cleanup changed successful result: code=%d status=%s", code, result.Status)
+	}
+	if len(runner.removed) != 1 || runner.removed[0] != ref {
+		t.Fatalf("shared run-owned image was not removed exactly once: %#v", runner.removed)
+	}
+	cleanupStages := 0
+	for _, step := range result.Steps {
+		if step.Name == "CLEANUP_TARGET_IMAGE" {
+			cleanupStages++
+		}
+	}
+	if cleanupStages != 1 {
+		t.Fatalf("expected one target image cleanup stage, got %d", cleanupStages)
 	}
 }

@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validation:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release-candidate:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-candidate.yml
+
+  release:
+    needs:
+      - validation
+      - release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify tag matches Action binary version
+        run: test "$(tr -d '[:space:]' < VERSION)" = "$GITHUB_REF_NAME"
+      - name: Build release archives and checksums
+        run: bash scripts/build-release.sh "$GITHUB_REF_NAME"
+      - name: Verify checksums
+        working-directory: dist
+        run: sha256sum --check checksums.txt
+      - name: Verify release binary metadata
+        run: |
+          mkdir release-smoke
+          tar -xzf "dist/upgradeproof_${GITHUB_REF_NAME}_linux_amd64.tar.gz" -C release-smoke
+          test "$(release-smoke/upgradeproof version | cut -d' ' -f2)" = "$GITHUB_REF_NAME"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "$GITHUB_REF_NAME"

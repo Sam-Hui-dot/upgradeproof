@@ -1,60 +1,64 @@
 # UpgradeProof
 
-**Status: Experimental / Validation Phase**
+**Test upgrades, not just fresh installs.**
 
-UpgradeProof tests stateful Docker Compose upgrade paths rather than fresh installs. A historical Compose release state starts first, repository-owned hooks seed real state, the complete Compose model is converged through every declared release environment, and repository-owned checks assert the invariants that must survive.
-
-UpgradeProof owns deterministic orchestration: unique Compose projects, ordered version hops, HTTP health waiting, evidence capture, safe project-scoped cleanup, CI exit semantics, JSON, and JUnit. The application repository still owns the business meaning of its seed and verification hooks.
-
-Reproducible evidence depends on pinned or otherwise stable inputs. Mutable image tags and local builds are recorded but are not described as fully reproducible.
-
-## Commands
+UpgradeProof starts a historical Docker Compose release, seeds persistent state, converges the same Compose project to a target release, and verifies the invariants that must survive.
 
 ```text
-upgradeproof validate [-c upgradeproof.yml]
-upgradeproof test [-c upgradeproof.yml] [--path name] [--keep-on-failure] [--report-dir .upgradeproof]
-upgradeproof version
+Release v1
+    ↓
+seed persistent state
+    ↓
+same Compose project / volumes
+    ↓
+Release v2
+    ↓
+verify
 ```
 
-Exit codes are stable in this experimental implementation:
+**Status: Experimental public tool / v0.1.0 release candidate.** No release has been published yet. Linux is the validated execution environment; macOS and Windows binaries are cross-compiled but are not described as battle-tested.
 
-```text
-0  all selected paths passed
-1  an executed path failed health, seed, or verification
-2  configuration or static safety/preflight failure
-3  Docker, Compose, evidence, cleanup, or other infrastructure failure
+## GitHub Action quick start
+
+After the `v0.1.0` tag and Release are published, a repository can run:
+
+```yaml
+- uses: Sam-Hui-dot/upgradeproof@v0.1.0
+  with:
+    config: upgradeproof.yml
 ```
 
-`validate` parses strict YAML, checks the P0 schema and static Compose safety contract, and runs `docker compose config --format json` without launching containers.
+Optional Action inputs are `path`, `report-directory` (default `.upgradeproof`), and `keep-on-failure` (default `false`). The Action downloads the binary corresponding to its release tag and verifies the archive against the published SHA256 checksum before execution. It does not compile UpgradeProof in the consuming repository and does not use `curl | sh`.
 
-## Experimental configuration
+## Configuration
+
+The public UpgradeProof v0.1.x configuration schema is `version: 2`. Breaking schema changes are not planned within v0.1.x.
 
 ```yaml
 version: 2
+
 compose:
   file: compose.upgrade.yml
+
 paths:
-  - name: v1-via-v2-to-current
+  - name: v1-to-v2
     from:
       env:
         APP_TAG: v1
-    via:
-      - env:
-          APP_TAG: v2
     to:
       env:
-        APP_TAG: current
-      build:
-        services: [api, worker]
-        tag_env: APP_TAG
+        APP_TAG: v2
+
 health:
   type: http
   url: http://127.0.0.1:18080/health
   timeout: 60s
   interval: 2s
+
 seed:
   command: ./upgrade-tests/seed.sh
   timeout: 60s
+
 verify:
   checks:
     - name: users-preserved
@@ -62,28 +66,82 @@ verify:
       timeout: 30s
 ```
 
-Each `from`, `via`, and `to` item is a complete release state expressed as a non-empty interpolation environment. Compose files use those variables normally, for example `image: example/api:${APP_TAG}`. UpgradeProof runs full-project `docker compose up -d --remove-orphans` for each state, leaving dependency ordering, `service_completed_successfully`, one-shot services, and change-based recreation to Compose. It does not build a separate dependency graph.
+Each `from`, optional `via`, and `to` item is a complete Compose release state expressed as a non-empty interpolation environment. Compose files use the values normally, for example `image: example/api:${APP_TAG}`. UpgradeProof applies the whole project at every state with `docker compose up -d --remove-orphans`. Compose remains responsible for dependency ordering, `service_completed_successfully`, one-shot services, and change-based recreation; UpgradeProof does not add another lifecycle or dependency DSL.
 
-An optional local target declares the smallest additional shape: `to.build.services` identifies Compose services to build and `to.build.tag_env` identifies the release variable that receives a run-owned `upgradeproof-target-<run-id>` tag. Registry targets omit `build`. Automatic release discovery and semantic-version path finding are intentionally absent.
+For a target built from the checkout, `to` may declare the Compose services whose image tag is controlled by one release environment variable:
 
-Hooks run from the directory containing the UpgradeProof configuration. They inherit the caller's normal environment, overlay the current release environment, and finally overlay UpgradeProof's controlled `UPGRADEPROOF_*` values. Inherited environment and release variables are never copied wholesale into JSON, JUnit, or report metadata.
+```yaml
+to:
+  env:
+    APP_TAG: current
+  build:
+    services:
+      - api
+      - worker
+    tag_env: APP_TAG
+```
+
+Registry-backed targets omit `build`. See [Configuration reference](docs/configuration.md) for the complete v0.1 schema and validation rules.
+
+## CLI
+
+```text
+upgradeproof validate [-c upgradeproof.yml]
+upgradeproof test [-c upgradeproof.yml] [--path name] [--keep-on-failure] [--report-dir .upgradeproof]
+upgradeproof version
+```
+
+Once `v0.1.0` is published, Go users can install the command directly:
+
+```sh
+go install github.com/Sam-Hui-dot/upgradeproof/cmd/upgradeproof@v0.1.0
+```
+
+Exit codes are part of the v0.1 CLI contract:
+
+```text
+0  all selected paths passed
+1  an executed path failed health, seed, or verification
+2  configuration or safety/preflight failure
+3  Docker, Compose, evidence, cleanup, or other infrastructure failure
+```
+
+`validate` parses strict YAML, audits the raw Compose source, resolves every declared release state with `docker compose config`, and audits every final model without launching containers.
+
+## Evidence and hooks
+
+Every run writes JSON, JUnit, hook stdout/stderr, Compose logs, and per-release service image identity. Hooks run from the directory containing `upgradeproof.yml`. They inherit the caller's normal environment, receive the current release environment, and finally receive UpgradeProof-controlled `UPGRADEPROOF_*` variables. UpgradeProof does not automatically serialize the inherited environment; hook-authored stdout and stderr are still evidence, so hooks must not print secrets.
+
+Reproducible evidence requires pinned or otherwise stable inputs. Mutable image tags and locally built images are recorded but are not presented as fully reproducible.
 
 ## Safety boundary
 
-Before Docker resources are created, UpgradeProof audits the declared file and both resolved Compose models for every release state. It rejects external volumes, explicit top-level volume `name`, writable host binds, custom drivers, non-empty `driver_opts`, and fixed `container_name`. Default volumes and explicit `driver: local` without options are allowed. Read-only binds are allowed. Cleanup is exactly `docker compose ... -p <generated-project> down --volumes --remove-orphans`; cleanup refuses any project name not generated with the `upgradeproof-` prefix. Locally built images are removed only by their exact run-owned tags after project cleanup. UpgradeProof never invokes Docker prune commands.
+Before creating Docker resources, UpgradeProof audits all resolved states. It rejects external volumes, explicit top-level volume names, writable host binds, custom volume drivers, non-empty `driver_opts`, and fixed `container_name`. Default volumes and explicit `driver: local` without options are allowed; read-only binds are allowed.
 
-See [docs/safety.md](docs/safety.md) for the exact contract.
+Cleanup is limited to generated `upgradeproof-*` Compose project names. Locally built images are removed only by their exact run-owned tag, with duplicate references removed once. UpgradeProof never runs a Docker prune command. See [Safety model](docs/safety.md).
 
-## Mandatory validation fixtures
+## Compatibility validation
 
-- `fixtures/file-state`: a multi-hop single-service upgrade using a project-scoped named volume; expected exit `0`.
-- `fixtures/broken-upgrade`: a healthy target that violates `state-value-preserved`; expected UpgradeProof exit `1`, while the fixture harness passes only when that failure is detected.
-- `fixtures/postgres-compose`: an application service upgraded over the same PostgreSQL service and named database volume; expected exit `0`.
+Validated against upgrade scenarios derived from five real OSS projects:
 
-Each fixture has a `run-fixture.sh` harness. CI runs all three sequentially on Ubuntu and preserves their JSON, JUnit, hook output, and Compose logs.
+- Savvy
+- SleepLab
+- Spliit Cloud
+- Labby
+- Notifuse
 
-## Limitations
+**External adoption: 0 confirmed repositories.** Compatibility validation is not upstream adoption, and UpgradeProof is not claimed to be used by those projects. The structured evidence and limitations are retained in [`docs/validation`](docs/validation/).
 
-Linux, Docker CLI, and Docker Compose v2 are required. Execution is sequential. One path-level HTTP health check is implemented. Upgrade paths are explicit. Hooks are shell commands. Local builds are not reproducible by definition. UpgradeProof relies on Compose convergence and does not add rollback or a general orchestration DSL. Port allocation, Docker HEALTHCHECK mode, database adapters, automatic invariant generation, release packaging, and hosted services remain deferred.
+## Mandatory fixtures
 
-No external repository has adopted UpgradeProof yet. Passing the internal fixtures is only the gate to begin real OSS validation, not proof of product success.
+- Fixture A, `fixtures/file-state`: expected UpgradeProof exit `0`.
+- Fixture B, `fixtures/broken-upgrade`: the application upgrade is intentionally broken; the harness passes only when UpgradeProof returns exit `1` and reports the failed invariant.
+- Fixture C, `fixtures/postgres-compose`: expected UpgradeProof exit `0` with PostgreSQL state preserved.
+
+CI runs gofmt, vet, unit tests, race tests, resolved-safety regressions, and all three fixtures. A separate release-candidate workflow builds the release matrix, verifies checksums and version metadata, and dogfoods `action.yml` against both the passing and intentionally broken fixtures.
+
+## Current limitations
+
+Execution is sequential, upgrade paths are explicit, health waiting is HTTP-only, and hooks are repository-owned shell commands. Local builds are not reproducible by definition. UpgradeProof relies on Docker Compose convergence and does not implement rollback, release discovery, semantic-version path finding, port allocation, a general orchestration DSL, or hosted services.
+
+See [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [Apache-2.0 license](LICENSE).

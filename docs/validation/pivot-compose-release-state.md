@@ -47,7 +47,7 @@ to:
     tag_env: APP_TAG
 ```
 
-The schema is intentionally breaking while experimental. `compose.service`, `compose.image_env`, scalar image steps, and the single-service `to.image/to.build.service` shape were removed.
+At the time of this pivot the schema was intentionally breaking while experimental. `compose.service`, `compose.image_env`, scalar image steps, and the single-service `to.image/to.build.service` shape were removed. After this validation succeeded, `version: 2` was frozen as the public schema for the v0.1.x release line.
 
 ## Architecture difference
 

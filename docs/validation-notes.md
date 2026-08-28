@@ -1,44 +1,42 @@
-# Validation-phase notes
+# Validation and release-candidate notes
 
 ## Current decision state
 
-The schema is experimental. The core engine and the three mandatory local fixtures are the only implementation target before real OSS work. No public `v0.1.0` tag, GitHub Release, package publication, or multi-platform release is permitted at this stage.
+Real OSS compatibility validation concluded **GO** for the Compose release-state abstraction. Configuration schema `version: 2` is now the public v0.1.x schema and is documented in [configuration.md](configuration.md). The project remains experimental, and no `v0.1.0` tag, GitHub Release, or package publication exists yet.
 
-External adoption: **0 confirmed repositories**.
+**External adoption: 0 confirmed repositories.** Compatibility validation is not upstream adoption.
 
 ## Compose semantics used by the engine
 
-- `docker compose -p` overrides environment, top-level `name`, and directory-derived project names.
-- A normal named volume is project-scoped; explicit `volume.name` is used as-is, and an external volume is managed outside the Compose application.
-- `docker compose up` recreates a service when its image/config changes while preserving mounted volumes unless anonymous volumes are explicitly renewed.
-- Compose interpolation accepts `UPGRADEPROOF_IMAGE` from the CLI process environment.
-- `docker compose config --format json` renders the merged, interpolated, normalized application model without launching containers.
-- Container inspection provides the actual image ID. Image inspection supplies a repository digest when available; local builds fall back to the immutable local image ID.
+- `docker compose -p` supplies a unique UpgradeProof-owned project name.
+- Every `from`, `via`, and `to` environment resolves and reapplies the complete Compose model.
+- Compose decides dependency order and recreates services whose resolved image or configuration changed while retaining stable services and named volumes.
+- `service_completed_successfully` and one-shot migration behavior remain Compose semantics; UpgradeProof does not synthesize a dependency graph.
+- `docker compose config --format json` provides the merged and interpolated model audited before any project starts.
+- Container and image inspection record every materialized service's requested image and actual digest or image ID.
 
 ## Exact lifecycle
 
-For each selected path, after static safety and Compose model validation:
+For each selected path, after every selected path and release state has passed raw, resolved, and canonical safety checks:
 
 ```text
-from (start full project)
+from (converge complete project)
 → wait for HTTP health
-→ seed
-→ capture seeded evidence
-→ via[0] (recreate selected service only)
+→ seed persistent state
+→ capture evidence
+→ via[0] (converge complete project under next environment)
 → wait and capture
 → ...
-→ target (recreate selected service only)
+→ to (optionally build declared target services, then converge complete project)
 → wait and capture
 → run every invariant check
-→ capture final evidence
-→ write JSON/JUnit
+→ capture final evidence and write JSON/JUnit
 → bounded project-scoped cleanup
+→ remove each distinct exact run-owned target image tag
 ```
 
-A local build target is built once per run and reused by all selected paths. Each path still receives a unique Compose project and state.
+Each path receives a unique Compose project and persistent state. Local target builds are path/run-owned and are not shared across paths.
 
-## Real OSS validation worksheet
+## Compatibility validation record
 
-For each of 3–5 candidates record repository, stars, topology, persistent services, supported historical path, current upgrade-test approach and orchestration LOC, UpgradeProof integration/seed/verify LOC, elapsed integration time, core special cases, and result. A forked integration is compatibility evidence rather than adoption.
-
-The GO/PIVOT/KILL thresholds remain those in the engineering task: at least three materially different successful integrations, measurable orchestration reduction, understandable project-specific checks, and no repeated product-specific hacks in core.
+The five project reports retain repository, stars at validation time, tested path, topology, persistent resources, migration mechanism, existing tests, integration LOC/effort, limitations, and result under [`validation/`](validation/). The prototypes are compatibility evidence only and were not submitted upstream.

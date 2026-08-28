@@ -27,6 +27,8 @@ const (
 	ExitInfrastructure = 3
 )
 
+var ErrInvalidBuildTarget = errors.New("invalid target build")
+
 type Options struct {
 	ConfigPath    string
 	RootDir       string
@@ -70,7 +72,7 @@ func (e *Engine) Run(ctx context.Context) (report.Report, int) {
 			steps[j].Model = model
 		}
 		if err == nil {
-			err = validateBuildOwnership(steps[len(steps)-1], run.RunID)
+			err = ValidateBuildOwnership(steps[len(steps)-1].State, steps[len(steps)-1].Model, run.RunID)
 		}
 		if err != nil {
 			project := GenerateProjectName(filepath.Base(e.Options.RootDir), path.Name, run.RunID)
@@ -79,7 +81,7 @@ func (e *Engine) Run(ctx context.Context) (report.Report, int) {
 			code := ExitInfrastructure
 			failed.Status = "infrastructure_failed"
 			run.OverallStatus = "infrastructure_failed"
-			if safety.IsViolation(err) {
+			if safety.IsViolation(err) || errors.Is(err, ErrInvalidBuildTarget) {
 				code = ExitPreflight
 				failed.Status = "preflight_failed"
 				run.OverallStatus = "preflight_failed"
@@ -271,7 +273,7 @@ func (e *Engine) finishPath(ctx context.Context, runID string, result report.Pat
 		result.Status = "infrastructure_failed"
 		return result, ExitInfrastructure
 	}
-	for _, imageRef := range ownedImages {
+	for _, imageRef := range uniqueStrings(ownedImages) {
 		ref := imageRef
 		if err := stage(&result, "CLEANUP_TARGET_IMAGE", func() error { return e.Compose.RemoveOwnedTargetImage(cleanupCtx, ref, runID) }); err != nil {
 			result.Status = "infrastructure_failed"
@@ -279,6 +281,19 @@ func (e *Engine) finishPath(ctx context.Context, runID string, result report.Pat
 		}
 	}
 	return result, code
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
 }
 
 func (e *Engine) resolve(ctx context.Context, result *report.PathResult, project string, step releaseStep) error {
@@ -333,18 +348,18 @@ func cloneState(state config.ReleaseState) config.ReleaseState {
 	return copyState
 }
 
-func validateBuildOwnership(target releaseStep, runID string) error {
-	if target.State.Build == nil {
+func ValidateBuildOwnership(state config.ReleaseState, model compose.Model, runID string) error {
+	if state.Build == nil {
 		return nil
 	}
 	suffix := ":upgradeproof-target-" + runID
-	for _, serviceName := range target.State.Build.Services {
-		service, ok := target.Model.Services[serviceName]
+	for _, serviceName := range state.Build.Services {
+		service, ok := model.Services[serviceName]
 		if !ok {
-			return fmt.Errorf("target build service %q does not exist in resolved Compose model", serviceName)
+			return fmt.Errorf("%w: service %q does not exist in resolved Compose model", ErrInvalidBuildTarget, serviceName)
 		}
 		if !strings.HasSuffix(service.Image, suffix) {
-			return fmt.Errorf("target build service %q image %q is not tagged through build.tag_env %q", serviceName, service.Image, target.State.Build.TagEnv)
+			return fmt.Errorf("%w: service %q image %q is not tagged through build.tag_env %q", ErrInvalidBuildTarget, serviceName, service.Image, state.Build.TagEnv)
 		}
 	}
 	return nil
