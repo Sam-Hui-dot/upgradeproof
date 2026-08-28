@@ -35,7 +35,7 @@ func (r Runner) Run(ctx context.Context, name, command string, timeout time.Dura
 	hookCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	shell, args := shellCommand(command)
-	runResult, err := r.CommandRunner.Run(hookCtx, r.RootDir, shell, args, controlledEnvironment(env))
+	runResult, err := r.CommandRunner.Run(hookCtx, r.RootDir, shell, args, mergedEnvironment(os.Environ(), env))
 	_ = os.MkdirAll(filepath.Dir(stdoutPath), 0o755)
 	stdoutErr := os.WriteFile(stdoutPath, runResult.Stdout, 0o644)
 	stderrErr := os.WriteFile(stderrPath, runResult.Stderr, 0o644)
@@ -58,8 +58,8 @@ func (r Runner) Run(ctx context.Context, name, command string, timeout time.Dura
 	return result
 }
 
-func controlledEnvironment(e Environment) []string {
-	return []string{
+func mergedEnvironment(base []string, e Environment) []string {
+	overlay := []string{
 		"UPGRADEPROOF_RUN_ID=" + e.RunID,
 		"UPGRADEPROOF_PROJECT=" + e.Project,
 		"UPGRADEPROOF_PHASE=" + e.Phase,
@@ -70,6 +70,15 @@ func controlledEnvironment(e Environment) []string {
 		"UPGRADEPROOF_COMPOSE_FILE=" + e.ComposeFile,
 		"UPGRADEPROOF_REPORT_DIR=" + e.ReportDir,
 	}
+	result := make([]string, 0, len(base)+len(overlay))
+	for _, item := range base {
+		key, _, ok := strings.Cut(item, "=")
+		if ok && strings.HasPrefix(strings.ToUpper(key), "UPGRADEPROOF_") {
+			continue
+		}
+		result = append(result, item)
+	}
+	return append(result, overlay...)
 }
 
 func shellCommand(command string) (string, []string) {

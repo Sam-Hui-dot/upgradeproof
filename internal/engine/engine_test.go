@@ -21,6 +21,7 @@ import (
 type engineRunner struct {
 	mu       sync.Mutex
 	upImages []string
+	removed  []string
 }
 
 func (f *engineRunner) Run(_ context.Context, _ string, name string, args []string, env []string) (command.Result, error) {
@@ -51,6 +52,10 @@ func (f *engineRunner) Run(_ context.Context, _ string, name string, args []stri
 	}
 	if len(args) >= 2 && args[0] == "image" && args[1] == "inspect" {
 		return command.Result{Stdout: []byte("example/app@sha256:digest\n")}, nil
+	}
+	if len(args) >= 3 && args[0] == "image" && args[1] == "rm" {
+		f.removed = append(f.removed, args[2])
+		return command.Result{}, nil
 	}
 	if strings.Contains(joined, " logs ") {
 		return command.Result{Stdout: []byte("compose evidence")}, nil
@@ -90,8 +95,15 @@ func TestMultiHopOrderAndVerificationFailurePropagation(t *testing.T) {
 	if len(path.Checks) != 1 || path.Checks[0].Status != "failed" || path.Checks[0].ExitCode != 1 {
 		t.Fatalf("failed invariant not propagated: %+v", path.Checks)
 	}
-	if path.Steps[len(path.Steps)-1].Name != "CLEANUP" || path.Steps[len(path.Steps)-1].Status != "passed" {
-		t.Fatalf("cleanup stage missing: %+v", path.Steps)
+	stages := map[string]string{}
+	for _, item := range path.Steps {
+		stages[item.Name] = item.Status
+	}
+	if stages["CLEANUP"] != "passed" || stages["CLEANUP_TARGET_IMAGE"] != "passed" {
+		t.Fatalf("cleanup stages missing: %+v", path.Steps)
+	}
+	if len(runner.removed) != 1 || !strings.HasPrefix(runner.removed[0], "upgradeproof-target:") {
+		t.Fatalf("run-owned target image was not removed exactly: %#v", runner.removed)
 	}
 }
 

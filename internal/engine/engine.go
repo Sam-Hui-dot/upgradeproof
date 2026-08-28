@@ -17,6 +17,7 @@ import (
 	"github.com/Sam-Hui-dot/upgradeproof/internal/health"
 	"github.com/Sam-Hui-dot/upgradeproof/internal/hooks"
 	"github.com/Sam-Hui-dot/upgradeproof/internal/report"
+	"github.com/Sam-Hui-dot/upgradeproof/internal/safety"
 )
 
 const (
@@ -54,9 +55,16 @@ func (e *Engine) Run(ctx context.Context) (report.Report, int) {
 	if err := e.Compose.Validate(ctx, paths[0].From); err != nil {
 		run.OverallStatus = "infrastructure_failed"
 		pathStatus := "infrastructure_failed"
+		exitCode := ExitInfrastructure
+		if safety.IsViolation(err) {
+			run.OverallStatus = "preflight_failed"
+			pathStatus = "preflight_failed"
+			exitCode = ExitPreflight
+		}
 		if ctx.Err() != nil {
 			run.OverallStatus = "interrupted"
 			pathStatus = "interrupted"
+			exitCode = ExitInfrastructure
 		}
 		for _, p := range paths {
 			project := GenerateProjectName(filepath.Base(e.Options.RootDir), p.Name, run.RunID)
@@ -66,7 +74,7 @@ func (e *Engine) Run(ctx context.Context) (report.Report, int) {
 		}
 		run.FinishedAt = time.Now().UTC()
 		e.writeReports(run)
-		return run, ExitInfrastructure
+		return run, exitCode
 	}
 	targetImages := map[string]string{}
 	for _, p := range paths {
@@ -100,6 +108,21 @@ func (e *Engine) Run(ctx context.Context) (report.Report, int) {
 		run.Paths = append(run.Paths, result)
 		if code > exitCode {
 			exitCode = code
+		}
+	}
+	if len(targetImages) > 0 && len(run.Paths) > 0 {
+		last := &run.Paths[len(run.Paths)-1]
+		if exitCode != ExitPassed && e.Options.KeepOnFailure && ctx.Err() == nil {
+			addSkippedStage(last, "CLEANUP_TARGET_IMAGE", "kept with failed Compose project because --keep-on-failure was set")
+		} else {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			for _, image := range targetImages {
+				if err := stage(last, "CLEANUP_TARGET_IMAGE", func() error { return e.Compose.RemoveOwnedTargetImage(cleanupCtx, image, run.RunID) }); err != nil {
+					exitCode = ExitInfrastructure
+					last.Status = "infrastructure_failed"
+				}
+			}
+			cancel()
 		}
 	}
 	run.FinishedAt = time.Now().UTC()

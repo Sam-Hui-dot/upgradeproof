@@ -1,0 +1,8 @@
+services:
+  storage-user:
+    image: busybox:1.36
+    volumes:
+      - shared:/data
+volumes:
+  shared:
+    name: actual-production-data

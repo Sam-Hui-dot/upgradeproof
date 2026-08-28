@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Sam-Hui-dot/upgradeproof/internal/command"
+	"github.com/Sam-Hui-dot/upgradeproof/internal/safety"
 )
 
 type Client struct {
@@ -24,9 +25,16 @@ type Model struct {
 }
 
 func (c Client) Validate(ctx context.Context, image string) error {
-	result, err := c.run(ctx, image, "config", "--format", "json")
+	resolved, err := c.runProject(ctx, "upgradeproof-preflight", image, "config", "--format", "json", "--no-normalize")
 	if err != nil {
-		return fmt.Errorf("docker compose config failed: %w: %s", err, strings.TrimSpace(string(result.Stderr)))
+		return fmt.Errorf("docker compose resolved config failed: %w: %s", err, strings.TrimSpace(string(resolved.Stderr)))
+	}
+	if err := safety.CheckResolvedCompose(resolved.Stdout, c.Service); err != nil {
+		return fmt.Errorf("resolved Compose safety audit: %w", err)
+	}
+	result, err := c.runProject(ctx, "upgradeproof-preflight", image, "config", "--format", "json")
+	if err != nil {
+		return fmt.Errorf("docker compose canonical config failed: %w: %s", err, strings.TrimSpace(string(result.Stderr)))
 	}
 	var model Model
 	if err := json.Unmarshal(result.Stdout, &model); err != nil {
@@ -34,6 +42,21 @@ func (c Client) Validate(ctx context.Context, image string) error {
 	}
 	if _, ok := model.Services[c.Service]; !ok {
 		return fmt.Errorf("compose service %q does not exist after interpolation", c.Service)
+	}
+	if err := safety.CheckCanonicalCompose(result.Stdout, c.Service); err != nil {
+		return fmt.Errorf("canonical Compose safety audit: %w", err)
+	}
+	return nil
+}
+
+func (c Client) RemoveOwnedTargetImage(ctx context.Context, imageTag, runID string) error {
+	expected := "upgradeproof-target:" + runID
+	if imageTag != expected || runID == "" {
+		return fmt.Errorf("refusing image removal for non-owned target %q", imageTag)
+	}
+	result, err := c.Runner.Run(ctx, c.RootDir, "docker", []string{"image", "rm", imageTag}, os.Environ())
+	if err != nil {
+		return fmt.Errorf("remove run-owned target image %q: %w: %s", imageTag, err, strings.TrimSpace(string(result.Stderr)))
 	}
 	return nil
 }

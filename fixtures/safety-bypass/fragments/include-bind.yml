@@ -1,0 +1,5 @@
+services:
+  sidecar:
+    image: busybox:1.36
+    volumes:
+      - ./host-data:/data

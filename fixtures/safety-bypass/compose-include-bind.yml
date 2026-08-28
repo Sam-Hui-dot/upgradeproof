@@ -1,0 +1,5 @@
+include:
+  - fragments/include-bind.yml
+services:
+  app:
+    image: ${UPGRADEPROOF_IMAGE}

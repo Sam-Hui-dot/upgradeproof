@@ -25,7 +25,9 @@ func TestRejectsUnsafeStorageAndContainerNames(t *testing.T) {
 		{"relative bind", "    volumes: [./data:/data]", "  data:", "writable bind"},
 		{"absolute bind", "    volumes: [/srv/data:/data]", "  data:", "writable bind"},
 		{"long bind", "    volumes:\n      - type: bind\n        source: ./data\n        target: /data", "  data:", "writable bind"},
-		{"driver bind", "    volumes: [data:/data]", "  data:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: /srv/data", "local-driver bind"},
+		{"driver bind", "    volumes: [data:/data]", "  data:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: /srv/data", "custom volume driver"},
+		{"remote driver", "    volumes: [data:/data]", "  data:\n    driver: nfs", "custom volume driver"},
+		{"remote driver opts", "    volumes: [data:/data]", "  data:\n    driver_opts:\n      type: nfs\n      device: :/remote", "driver_opts"},
 		{"container name", "    container_name: fixed\n    volumes: [data:/data]", "  data:", "fixed container_name"},
 	}
 	for _, tc := range tests {
@@ -35,6 +37,45 @@ func TestRejectsUnsafeStorageAndContainerNames(t *testing.T) {
 				t.Fatalf("expected %q, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+func TestResolvedComposeAuditAllowsUnnormalizedProjectVolume(t *testing.T) {
+	data := []byte(`{"name":"upgradeproof-preflight","services":{"app":{"image":"app:v1","volumes":[{"type":"volume","source":"data","target":"/data","volume":{}}]}},"volumes":{"data":{}}}`)
+	if err := CheckResolvedCompose(data, "app"); err != nil {
+		t.Fatalf("normal project-scoped volume rejected: %v", err)
+	}
+}
+
+func TestResolvedComposeAuditRejectsMergedUnsafeFields(t *testing.T) {
+	tests := []struct {
+		name, model, want string
+	}{
+		{"bind", `{"services":{"app":{"image":"app:v1","volumes":[{"type":"bind","source":"/host/data","target":"/data"}]}}}`, "writable bind"},
+		{"container name", `{"services":{"app":{"image":"app:v1","container_name":"fixed"}}}`, "fixed container_name"},
+		{"external volume", `{"services":{"app":{"image":"app:v1"}},"volumes":{"data":{"external":true,"name":"data"}}}`, "external"},
+		{"explicit volume", `{"services":{"app":{"image":"app:v1"}},"volumes":{"data":{"name":"production-data"}}}`, "explicit name"},
+		{"custom driver", `{"services":{"app":{"image":"app:v1"}},"volumes":{"data":{"driver":"custom"}}}`, "custom volume driver"},
+		{"remote opts", `{"services":{"app":{"image":"app:v1"}},"volumes":{"data":{"driver_opts":{"type":"nfs","device":":/remote"}}}}`, "driver_opts"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckResolvedCompose([]byte(tc.model), "app")
+			if err == nil || !IsViolation(err) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected resolved safety violation %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestCanonicalAuditAllowsOnlyComposeGeneratedVolumeName(t *testing.T) {
+	safe := []byte(`{"name":"upgradeproof-preflight","services":{"app":{"image":"app:v1","volumes":[{"type":"volume","source":"data","target":"/data","volume":{}}]}},"volumes":{"data":{"name":"upgradeproof-preflight_data"}}}`)
+	if err := CheckCanonicalCompose(safe, "app"); err != nil {
+		t.Fatalf("Compose-generated volume name rejected: %v", err)
+	}
+	unsafe := []byte(`{"name":"upgradeproof-preflight","services":{"app":{"image":"app:v1"}},"volumes":{"data":{"name":"production-data"}}}`)
+	if err := CheckCanonicalCompose(unsafe, "app"); err == nil || !IsViolation(err) {
+		t.Fatalf("non-project-scoped canonical volume name accepted: %v", err)
 	}
 }
 

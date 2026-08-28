@@ -51,14 +51,27 @@ func WriteJUnit(path string, value Report) error {
 	root := junitSuites{Name: "upgradeproof"}
 	for _, p := range value.Paths {
 		suite := junitSuite{Name: p.Name}
+		hasFailedCheck := false
 		for _, check := range p.Checks {
 			caseResult := junitCase{Name: check.Name, Classname: "upgradeproof." + p.Name, Time: seconds(check)}
 			if check.Status != "passed" {
+				hasFailedCheck = true
 				caseResult.Failure = &junitFailure{Message: check.Error, Body: fmt.Sprintf("exit_code=%d stdout=%s stderr=%s", check.ExitCode, check.StdoutPath, check.StderrPath)}
 				suite.Failures++
 			}
 			suite.Tests++
 			suite.Cases = append(suite.Cases, caseResult)
+		}
+		if p.Status != "passed" && !hasFailedCheck {
+			message, body := pathFailure(p)
+			suite.Cases = append(suite.Cases, junitCase{
+				Name:      "path-lifecycle",
+				Classname: "upgradeproof." + p.Name,
+				Time:      "0.000",
+				Failure:   &junitFailure{Message: message, Body: body},
+			})
+			suite.Tests++
+			suite.Failures++
 		}
 		root.Tests += suite.Tests
 		root.Failures += suite.Failures
@@ -74,6 +87,19 @@ func WriteJUnit(path string, value Report) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0o644)
+}
+
+func pathFailure(p PathResult) (string, string) {
+	for _, stage := range p.Steps {
+		if stage.Status == "failed" {
+			message := stage.Error
+			if message == "" {
+				message = "path lifecycle stage failed"
+			}
+			return message, fmt.Sprintf("path_status=%s stage=%s artifact_directory=%s", p.Status, stage.Name, p.ArtifactDirectory)
+		}
+	}
+	return "path lifecycle failed", fmt.Sprintf("path_status=%s artifact_directory=%s", p.Status, p.ArtifactDirectory)
 }
 
 func seconds(check CheckResult) string {

@@ -11,11 +11,49 @@ import (
 
 var windowsPath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 
+var ErrViolation = errors.New("unsafe Compose configuration")
+
+type ViolationError struct{ Problems []error }
+
+func (e *ViolationError) Error() string { return errors.Join(e.Problems...).Error() }
+func (e *ViolationError) Unwrap() error { return ErrViolation }
+
+func IsViolation(err error) bool { return errors.Is(err, ErrViolation) }
+
 func CheckCompose(data []byte, imageService string) error {
 	var root map[string]any
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("parse compose file: %w", err)
 	}
+	return auditModel(root, imageService, true, false)
+}
+
+// CheckResolvedCompose audits the final model produced by
+// `docker compose config --format json --no-normalize`. Compose has already
+// applied include, extends, merge, path resolution, and interpolation, while
+// --no-normalize avoids generated project-scoped volume names being mistaken
+// for user-supplied volume.name declarations.
+func CheckResolvedCompose(data []byte, imageService string) error {
+	var root map[string]any
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("parse resolved Compose model: %w", err)
+	}
+	return auditModel(root, imageService, false, false)
+}
+
+// CheckCanonicalCompose audits Compose's fully normalized canonical model. A
+// volume name is accepted only when it is the exact project-scoped name that
+// Compose generated from the model's project and logical volume names. The
+// companion non-normalized audit still rejects user-supplied name semantics.
+func CheckCanonicalCompose(data []byte, imageService string) error {
+	var root map[string]any
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("parse canonical Compose model: %w", err)
+	}
+	return auditModel(root, imageService, false, true)
+}
+
+func auditModel(root map[string]any, imageService string, requireImageInterpolation, allowGeneratedVolumeNames bool) error {
 	var problems []error
 	services, ok := stringMap(root["services"])
 	if !ok || len(services) == 0 {
@@ -24,7 +62,7 @@ func CheckCompose(data []byte, imageService string) error {
 	selected, ok := stringMap(services[imageService])
 	if !ok {
 		problems = append(problems, fmt.Errorf("compose service %q does not exist", imageService))
-	} else {
+	} else if requireImageInterpolation {
 		image, _ := selected["image"].(string)
 		if !strings.Contains(image, "${UPGRADEPROOF_IMAGE") && !strings.Contains(image, "$UPGRADEPROOF_IMAGE") {
 			problems = append(problems, fmt.Errorf("service %q image must interpolate UPGRADEPROOF_IMAGE", imageService))
@@ -60,17 +98,23 @@ func CheckCompose(data []byte, imageService string) error {
 			problems = append(problems, fmt.Errorf("volume %q is external", name))
 		}
 		if explicit, ok := volume["name"].(string); ok && strings.TrimSpace(explicit) != "" {
-			problems = append(problems, fmt.Errorf("volume %q has explicit name %q", name, explicit))
-		}
-		if opts, ok := stringMap(volume["driver_opts"]); ok {
-			typeValue := strings.ToLower(fmt.Sprint(opts["type"]))
-			oValue := strings.ToLower(fmt.Sprint(opts["o"]))
-			if typeValue == "none" && hasCSVToken(oValue, "bind") {
-				problems = append(problems, fmt.Errorf("volume %q uses local-driver bind options", name))
+			project, _ := root["name"].(string)
+			generated := project != "" && explicit == project+"_"+name
+			if !allowGeneratedVolumeNames || !generated {
+				problems = append(problems, fmt.Errorf("volume %q has explicit name or non-project-scoped name %q", name, explicit))
 			}
 		}
+		if driver, ok := volume["driver"].(string); ok && strings.TrimSpace(driver) != "" {
+			problems = append(problems, fmt.Errorf("volume %q uses custom volume driver %q; ownership cannot be proven", name, driver))
+		}
+		if opts, ok := stringMap(volume["driver_opts"]); ok && len(opts) > 0 {
+			problems = append(problems, fmt.Errorf("volume %q uses driver_opts; ownership cannot be proven", name))
+		}
 	}
-	return errors.Join(problems...)
+	if len(problems) > 0 {
+		return &ViolationError{Problems: problems}
+	}
+	return nil
 }
 
 func checkMount(raw any) error {

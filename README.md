@@ -60,11 +60,11 @@ verify:
 
 `to` must define exactly one of `image` or `build`. Local targets use `to.build.service`; registry targets use `to.image`. Automatic release discovery and semantic-version path finding are intentionally absent.
 
-The application service image in the Compose file must interpolate `${UPGRADEPROOF_IMAGE}`. Hooks run from the directory containing the UpgradeProof configuration and receive only the documented `UPGRADEPROOF_*` variables.
+The application service image in the Compose file must interpolate `${UPGRADEPROOF_IMAGE}`. Hooks run from the directory containing the UpgradeProof configuration. They inherit the caller's normal environment so standard tools, credentials, and repository-specific variables remain available; UpgradeProof overlays and owns the documented `UPGRADEPROOF_*` variables. Inherited environment values are never copied into JSON, JUnit, or report metadata.
 
 ## Safety boundary
 
-Before Docker resources are created, UpgradeProof rejects external volumes, explicit top-level volume `name`, writable relative or absolute host binds, local-driver bind tricks, and fixed `container_name`. Read-only binds are allowed. Cleanup is exactly `docker compose ... -p <generated-project> down --volumes --remove-orphans`; cleanup refuses any project name not generated with the `upgradeproof-` prefix. UpgradeProof never invokes Docker prune commands.
+Before Docker resources are created, UpgradeProof audits both the declared file and Compose's fully resolved include/extends/merge/interpolation model. It rejects external volumes, explicit top-level volume `name`, writable relative or absolute host binds, any custom volume driver or driver options whose ownership cannot be proven, and fixed `container_name`. Read-only binds are allowed. Cleanup is exactly `docker compose ... -p <generated-project> down --volumes --remove-orphans`; cleanup refuses any project name not generated with the `upgradeproof-` prefix. A locally built target tag is removed only by its exact run-owned `upgradeproof-target:<run-id>` reference after project cleanup. UpgradeProof never invokes Docker prune commands.
 
 See [docs/safety.md](docs/safety.md) for the exact contract.
 

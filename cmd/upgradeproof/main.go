@@ -64,6 +64,10 @@ func runValidate(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Health.Timeout.Duration)
 	defer cancel()
 	if err := client.Validate(ctx, cfg.Paths[0].From); err != nil {
+		if safety.IsViolation(err) {
+			fmt.Fprintf(os.Stderr, "validation failed: %v\n", err)
+			return engine.ExitPreflight
+		}
 		fmt.Fprintf(os.Stderr, "validation infrastructure failed: %v\n", err)
 		return engine.ExitInfrastructure
 	}

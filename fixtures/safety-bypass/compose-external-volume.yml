@@ -1,0 +1,5 @@
+include:
+  - fragments/external-volume.yml
+services:
+  app:
+    image: ${UPGRADEPROOF_IMAGE}

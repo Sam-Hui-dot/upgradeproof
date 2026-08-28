@@ -1,0 +1,11 @@
+services:
+  storage-user:
+    image: busybox:1.36
+    volumes:
+      - shared:/data
+volumes:
+  shared:
+    driver_opts:
+      type: nfs
+      o: addr=192.0.2.1,rw
+      device: :/remote/data

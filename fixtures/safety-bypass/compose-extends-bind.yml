@@ -1,0 +1,6 @@
+services:
+  app:
+    extends:
+      file: fragments/extends-bind.yml
+      service: base
+    image: ${UPGRADEPROOF_IMAGE}

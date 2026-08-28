@@ -27,6 +27,8 @@ jobs:
         run: go test -race ./...
       - name: Build CLI
         run: go build -o upgradeproof ./cmd/upgradeproof
+      - name: Resolved Compose safety bypass regressions
+        run: sh fixtures/safety-bypass/run-regressions.sh "$PWD/upgradeproof"
       - name: Fixture A - file state
         run: sh fixtures/file-state/run-fixture.sh "$PWD/upgradeproof"
       - name: Fixture B - broken upgrade detection

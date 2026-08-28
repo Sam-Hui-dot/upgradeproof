@@ -1,0 +1,5 @@
+include:
+  - fragments/remote-opts.yml
+services:
+  app:
+    image: ${UPGRADEPROOF_IMAGE}

@@ -58,3 +58,45 @@ func TestResolveImageFallsBackToImageID(t *testing.T) {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
+
+func TestValidateAuditsResolvedComposeModel(t *testing.T) {
+	model := `{"services":{"app":{"image":"app:v1","container_name":"fixed"}}}`
+	runner := &fakeRunner{results: []command.Result{{Stdout: []byte(model)}}}
+	client := New(t.TempDir(), "compose.yml", "app", runner)
+	err := client.Validate(context.Background(), "app:v1")
+	if err == nil || !strings.Contains(err.Error(), "fixed container_name") {
+		t.Fatalf("resolved unsafe model was not rejected: %v", err)
+	}
+	call := strings.Join(runner.calls[0], " ")
+	if !strings.Contains(call, "-p upgradeproof-preflight config --format json --no-normalize") {
+		t.Fatalf("resolved config command missing: %s", call)
+	}
+}
+
+func TestValidateAuditsCanonicalComposeModel(t *testing.T) {
+	resolved := `{"services":{"app":{"image":"app:v1"}}}`
+	canonical := `{"name":"upgradeproof-preflight","services":{"app":{"image":"app:v1","volumes":[{"type":"bind","source":"/host/data","target":"/data"}]}}}`
+	runner := &fakeRunner{results: []command.Result{{Stdout: []byte(resolved)}, {Stdout: []byte(canonical)}}}
+	client := New(t.TempDir(), "compose.yml", "app", runner)
+	err := client.Validate(context.Background(), "app:v1")
+	if err == nil || !strings.Contains(err.Error(), "canonical Compose safety audit") || !strings.Contains(err.Error(), "writable bind") {
+		t.Fatalf("canonical unsafe model was not rejected: %v", err)
+	}
+}
+
+func TestRemoveOwnedTargetImageUsesExactTag(t *testing.T) {
+	runner := &fakeRunner{}
+	client := New(t.TempDir(), "compose.yml", "app", runner)
+	if err := client.RemoveOwnedTargetImage(context.Background(), "some-image:latest", "run"); err == nil {
+		t.Fatal("expected refusal for non-owned image")
+	}
+	if len(runner.calls) != 0 {
+		t.Fatal("non-owned image reached command runner")
+	}
+	if err := client.RemoveOwnedTargetImage(context.Background(), "upgradeproof-target:run", "run"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(runner.calls[0], " "); got != "docker image rm upgradeproof-target:run" {
+		t.Fatalf("unexpected image cleanup command: %s", got)
+	}
+}

@@ -1,0 +1,5 @@
+include:
+  - fragments/custom-driver.yml
+services:
+  app:
+    image: ${UPGRADEPROOF_IMAGE}
