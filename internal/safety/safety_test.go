@@ -25,7 +25,7 @@ func TestRejectsUnsafeStorageAndContainerNames(t *testing.T) {
 		{"relative bind", "    volumes: [./data:/data]", "  data:", "writable bind"},
 		{"absolute bind", "    volumes: [/srv/data:/data]", "  data:", "writable bind"},
 		{"long bind", "    volumes:\n      - type: bind\n        source: ./data\n        target: /data", "  data:", "writable bind"},
-		{"driver bind", "    volumes: [data:/data]", "  data:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: /srv/data", "custom volume driver"},
+		{"driver bind", "    volumes: [data:/data]", "  data:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: /srv/data", "driver_opts"},
 		{"remote driver", "    volumes: [data:/data]", "  data:\n    driver: nfs", "custom volume driver"},
 		{"remote driver opts", "    volumes: [data:/data]", "  data:\n    driver_opts:\n      type: nfs\n      device: :/remote", "driver_opts"},
 		{"container name", "    container_name: fixed\n    volumes: [data:/data]", "  data:", "fixed container_name"},
@@ -79,9 +79,27 @@ func TestCanonicalAuditAllowsOnlyComposeGeneratedVolumeName(t *testing.T) {
 	}
 }
 
-func TestRejectsMissingInterpolationContract(t *testing.T) {
-	err := CheckCompose([]byte("services:\n  app:\n    image: app:latest\n"), "app")
-	if err == nil || !strings.Contains(err.Error(), "interpolate") {
-		t.Fatalf("expected interpolation error, got %v", err)
+func TestVolumeDriverPolicy(t *testing.T) {
+	tests := []struct {
+		name, volume string
+		wantError    string
+	}{
+		{"unnamed default local", "  data:\n", ""},
+		{"explicit local without opts", "  data:\n    driver: local\n", ""},
+		{"explicit local with opts", "  data:\n    driver: local\n    driver_opts:\n      type: none\n      device: /host/data\n", "driver_opts"},
+		{"custom driver", "  data:\n    driver: nfs\n", "custom volume driver"},
+		{"external", "  data:\n    external: true\n", "external"},
+		{"explicit name", "  data:\n    name: shared-data\n", "explicit name"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckCompose(compose("    volumes: [data:/data]", tc.volume))
+			if tc.wantError == "" && err != nil {
+				t.Fatalf("safe volume rejected: %v", err)
+			}
+			if tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("expected %q, got %v", tc.wantError, err)
+			}
+		})
 	}
 }

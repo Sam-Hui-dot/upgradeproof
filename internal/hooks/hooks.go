@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,15 +15,16 @@ import (
 )
 
 type Environment struct {
-	RunID        string
-	Project      string
-	Phase        string
-	Path         string
-	FromImage    string
-	CurrentImage string
-	TargetImage  string
-	ComposeFile  string
-	ReportDir    string
+	RunID       string
+	Project     string
+	Phase       string
+	Path        string
+	FromStep    string
+	CurrentStep string
+	TargetStep  string
+	ComposeFile string
+	ReportDir   string
+	ReleaseEnv  map[string]string
 }
 
 type Runner struct {
@@ -64,19 +66,34 @@ func mergedEnvironment(base []string, e Environment) []string {
 		"UPGRADEPROOF_PROJECT=" + e.Project,
 		"UPGRADEPROOF_PHASE=" + e.Phase,
 		"UPGRADEPROOF_PATH=" + e.Path,
-		"UPGRADEPROOF_FROM_IMAGE=" + e.FromImage,
-		"UPGRADEPROOF_CURRENT_IMAGE=" + e.CurrentImage,
-		"UPGRADEPROOF_TARGET_IMAGE=" + e.TargetImage,
+		"UPGRADEPROOF_FROM_STEP=" + e.FromStep,
+		"UPGRADEPROOF_CURRENT_STEP=" + e.CurrentStep,
+		"UPGRADEPROOF_TARGET_STEP=" + e.TargetStep,
 		"UPGRADEPROOF_COMPOSE_FILE=" + e.ComposeFile,
 		"UPGRADEPROOF_REPORT_DIR=" + e.ReportDir,
 	}
-	result := make([]string, 0, len(base)+len(overlay))
+	releaseKeys := map[string]bool{}
+	for key := range e.ReleaseEnv {
+		releaseKeys[strings.ToUpper(key)] = true
+	}
+	result := make([]string, 0, len(base)+len(e.ReleaseEnv)+len(overlay))
 	for _, item := range base {
 		key, _, ok := strings.Cut(item, "=")
-		if ok && strings.HasPrefix(strings.ToUpper(key), "UPGRADEPROOF_") {
+		upper := strings.ToUpper(key)
+		if ok && (strings.HasPrefix(upper, "UPGRADEPROOF_") || releaseKeys[upper]) {
 			continue
 		}
 		result = append(result, item)
+	}
+	keys := make([]string, 0, len(e.ReleaseEnv))
+	for key := range e.ReleaseEnv {
+		if !strings.HasPrefix(strings.ToUpper(key), "UPGRADEPROOF_") {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result = append(result, key+"="+e.ReleaseEnv[key])
 	}
 	return append(result, overlay...)
 }

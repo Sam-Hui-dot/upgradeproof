@@ -7,18 +7,25 @@ import (
 	"testing"
 )
 
-const validConfig = `version: 1
+const validConfig = `version: 2
 compose:
   file: compose.yml
-  service: app
-  image_env: UPGRADEPROOF_IMAGE
 paths:
   - name: multi
-    from: app:v1
-    via: [app:v2, app:v3]
+    from:
+      env:
+        APP_TAG: v1
+    via:
+      - env:
+          APP_TAG: v2
+      - env:
+          APP_TAG: v3
     to:
+      env:
+        APP_TAG: current
       build:
-        service: app
+        services: [app]
+        tag_env: APP_TAG
 health:
   type: http
   url: http://127.0.0.1:8080/health
@@ -52,9 +59,17 @@ func TestLoadStrictAndMultiHopOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := strings.Join(append(append([]string{cfg.Paths[0].From}, cfg.Paths[0].Via...), "build:"+cfg.Paths[0].To.Build.Service), ",")
-	if got != "app:v1,app:v2,app:v3,build:app" {
+	states := append([]ReleaseState{cfg.Paths[0].From}, cfg.Paths[0].Via...)
+	states = append(states, cfg.Paths[0].To)
+	var tags []string
+	for _, state := range states {
+		tags = append(tags, state.Env["APP_TAG"])
+	}
+	if got := strings.Join(tags, ","); got != "v1,v2,v3,current" {
 		t.Fatalf("unexpected declared order: %s", got)
+	}
+	if got := cfg.Paths[0].To.Build.Services[0]; got != "app" {
+		t.Fatalf("unexpected build service: %s", got)
 	}
 }
 
@@ -65,24 +80,25 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsAmbiguousTarget(t *testing.T) {
-	body := strings.Replace(validConfig, "to:\n      build:", "to:\n      image: app:target\n      build:", 1)
+func TestLoadRejectsBuildOutsideTarget(t *testing.T) {
+	body := strings.Replace(validConfig, "APP_TAG: v1", "APP_TAG: v1\n      build:\n        services: [app]\n        tag_env: APP_TAG", 1)
 	_, err := Load(writeConfig(t, body))
-	if err == nil || !strings.Contains(err.Error(), "exactly one") {
-		t.Fatalf("expected target ambiguity error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "only allowed for a target") {
+		t.Fatalf("expected source build rejection, got %v", err)
 	}
 }
 
-func TestLoadRejectsInvalidDurationAndPathShape(t *testing.T) {
-	for _, replacement := range []string{"timeout: forever", "from: \"\""} {
-		body := validConfig
-		if strings.HasPrefix(replacement, "timeout") {
-			body = strings.Replace(body, "timeout: 10s", replacement, 1)
-		} else {
-			body = strings.Replace(body, "from: app:v1", replacement, 1)
-		}
+func TestLoadRejectsInvalidReleaseState(t *testing.T) {
+	tests := []struct{ old, replacement string }{
+		{"timeout: 10s", "timeout: forever"},
+		{"env:\n        APP_TAG: v1", "env: {}"},
+		{"APP_TAG: v1", "UPGRADEPROOF_FAKE: v1"},
+		{"tag_env: APP_TAG", "tag_env: OTHER_TAG"},
+	}
+	for _, tc := range tests {
+		body := strings.Replace(validConfig, tc.old, tc.replacement, 1)
 		if _, err := Load(writeConfig(t, body)); err == nil {
-			t.Fatalf("expected error for %s", replacement)
+			t.Fatalf("expected error for replacement %q", tc.replacement)
 		}
 	}
 }

@@ -63,15 +63,21 @@ func runValidate(args []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Health.Timeout.Duration)
 	defer cancel()
-	if err := client.Validate(ctx, cfg.Paths[0].From); err != nil {
-		if safety.IsViolation(err) {
-			fmt.Fprintf(os.Stderr, "validation failed: %v\n", err)
-			return engine.ExitPreflight
+	for _, path := range cfg.Paths {
+		states := append([]config.ReleaseState{path.From}, path.Via...)
+		states = append(states, path.To)
+		for i, state := range states {
+			if _, err := client.Validate(ctx, state.Env); err != nil {
+				if safety.IsViolation(err) {
+					fmt.Fprintf(os.Stderr, "validation failed for path %q state %d: %v\n", path.Name, i, err)
+					return engine.ExitPreflight
+				}
+				fmt.Fprintf(os.Stderr, "validation infrastructure failed for path %q state %d: %v\n", path.Name, i, err)
+				return engine.ExitInfrastructure
+			}
 		}
-		fmt.Fprintf(os.Stderr, "validation infrastructure failed: %v\n", err)
-		return engine.ExitInfrastructure
 	}
-	fmt.Printf("configuration valid: %d path(s), service=%s\n", len(cfg.Paths), cfg.Compose.Service)
+	fmt.Printf("configuration valid: %d path(s), Compose release states resolved and audited\n", len(cfg.Paths))
 	return engine.ExitPassed
 }
 
@@ -134,11 +140,11 @@ func loadProject(configPath string) (*config.Config, compose.Client, string, err
 	if err != nil {
 		return nil, compose.Client{}, "", err
 	}
-	if err := safety.CheckCompose(data, cfg.Compose.Service); err != nil {
+	if err := safety.CheckCompose(data); err != nil {
 		return nil, compose.Client{}, "", fmt.Errorf("unsafe Compose configuration: %w", err)
 	}
 	runner := command.ExecRunner{}
-	return cfg, compose.New(rootDir, composePath, cfg.Compose.Service, runner), rootDir, nil
+	return cfg, compose.New(rootDir, composePath, runner), rootDir, nil
 }
 
 func absolute(path string) string {

@@ -13,15 +13,14 @@ type Report struct {
 }
 
 type PathResult struct {
-	Name              string          `json:"name"`
-	Status            string          `json:"status"`
-	Steps             []Stage         `json:"steps"`
-	Hooks             []CheckResult   `json:"hooks"`
-	Checks            []CheckResult   `json:"checks"`
-	RequestedImages   []string        `json:"requested_images"`
-	ResolvedImages    []ImageIdentity `json:"resolved_images"`
-	ProjectName       string          `json:"project_name"`
-	ArtifactDirectory string          `json:"artifact_directory"`
+	Name              string            `json:"name"`
+	Status            string            `json:"status"`
+	Steps             []Stage           `json:"steps"`
+	Hooks             []CheckResult     `json:"hooks"`
+	Checks            []CheckResult     `json:"checks"`
+	ReleaseStates     []ReleaseIdentity `json:"release_states"`
+	ProjectName       string            `json:"project_name"`
+	ArtifactDirectory string            `json:"artifact_directory"`
 }
 
 type Stage struct {
@@ -33,7 +32,14 @@ type Stage struct {
 	Error      string    `json:"error,omitempty"`
 }
 
+type ReleaseIdentity struct {
+	Step     string          `json:"step"`
+	Services []ImageIdentity `json:"services"`
+}
+
 type ImageIdentity struct {
+	Service   string `json:"service"`
+	Container string `json:"container_id"`
 	Requested string `json:"requested"`
 	Resolved  string `json:"resolved"`
 }

@@ -10,4 +10,4 @@ set +e
 CODE=$?
 set -e
 test "$CODE" -eq 1
-python3 -c 'import glob,json,subprocess; r=json.load(open(sorted(glob.glob(".artifacts/*/report.json"))[-1])); p=r["paths"][0]; assert r["overall_status"] == "failed"; assert p["checks"][0]["name"] == "state-value-preserved"; assert p["checks"][0]["status"] == "failed"; assert subprocess.run(["docker","image","inspect","upgradeproof-target:"+r["run_id"]],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode != 0'
+python3 -c 'import glob,json,subprocess; r=json.load(open(sorted(glob.glob(".artifacts/*/report.json"))[-1])); p=r["paths"][0]; assert r["overall_status"] == "failed"; assert p["checks"][0]["name"] == "state-value-preserved"; assert p["checks"][0]["status"] == "failed"; assert subprocess.run(["docker","image","inspect","upgradeproof-fixture-broken:upgradeproof-target-"+r["run_id"]],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode != 0'

@@ -3,4 +3,4 @@ services:
     extends:
       file: fragments/extends-bind.yml
       service: base
-    image: ${UPGRADEPROOF_IMAGE}
+    image: example/app:${APP_TAG}

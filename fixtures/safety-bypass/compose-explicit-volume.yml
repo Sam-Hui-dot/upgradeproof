@@ -2,4 +2,4 @@ include:
   - fragments/explicit-volume.yml
 services:
   app:
-    image: ${UPGRADEPROOF_IMAGE}
+    image: example/app:${APP_TAG}

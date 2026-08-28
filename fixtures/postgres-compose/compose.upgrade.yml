@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${UPGRADEPROOF_IMAGE}
+    image: upgradeproof-fixture-postgres:${APP_TAG}
     build:
       context: ./app
       args:

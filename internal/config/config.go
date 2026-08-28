@@ -41,25 +41,24 @@ type Config struct {
 }
 
 type ComposeConfig struct {
-	File     string `yaml:"file"`
-	Service  string `yaml:"service"`
-	ImageEnv string `yaml:"image_env"`
+	File string `yaml:"file"`
 }
 
 type Path struct {
-	Name string   `yaml:"name"`
-	From string   `yaml:"from"`
-	Via  []string `yaml:"via,omitempty"`
-	To   Target   `yaml:"to"`
+	Name string         `yaml:"name"`
+	From ReleaseState   `yaml:"from"`
+	Via  []ReleaseState `yaml:"via,omitempty"`
+	To   ReleaseState   `yaml:"to"`
 }
 
-type Target struct {
-	Image string       `yaml:"image,omitempty"`
-	Build *BuildTarget `yaml:"build,omitempty"`
+type ReleaseState struct {
+	Env   map[string]string `yaml:"env"`
+	Build *BuildTarget      `yaml:"build,omitempty"`
 }
 
 type BuildTarget struct {
-	Service string `yaml:"service"`
+	Services []string `yaml:"services"`
+	TagEnv   string   `yaml:"tag_env"`
 }
 
 type HealthConfig struct {
@@ -109,19 +108,13 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) Validate(baseDir string) error {
 	var errs []error
-	if c.Version != 1 {
-		errs = append(errs, fmt.Errorf("version must be 1, got %d", c.Version))
+	if c.Version != 2 {
+		errs = append(errs, fmt.Errorf("version must be 2, got %d", c.Version))
 	}
 	if strings.TrimSpace(c.Compose.File) == "" {
 		errs = append(errs, errors.New("compose.file is required"))
 	} else if st, err := os.Stat(filepath.Join(baseDir, c.Compose.File)); err != nil || st.IsDir() {
 		errs = append(errs, fmt.Errorf("compose.file does not exist or is not a file: %s", c.Compose.File))
-	}
-	if strings.TrimSpace(c.Compose.Service) == "" {
-		errs = append(errs, errors.New("compose.service is required"))
-	}
-	if c.Compose.ImageEnv != "UPGRADEPROOF_IMAGE" {
-		errs = append(errs, errors.New("compose.image_env must be UPGRADEPROOF_IMAGE"))
 	}
 	if len(c.Paths) == 0 {
 		errs = append(errs, errors.New("at least one path is required"))
@@ -135,29 +128,11 @@ func (c *Config) Validate(baseDir string) error {
 			errs = append(errs, fmt.Errorf("duplicate path name %q", p.Name))
 		}
 		seenPaths[p.Name] = true
-		if strings.TrimSpace(p.From) == "" {
-			errs = append(errs, fmt.Errorf("%s.from is required", prefix))
+		errs = append(errs, validateReleaseState(prefix+".from", p.From, false)...)
+		for j, state := range p.Via {
+			errs = append(errs, validateReleaseState(fmt.Sprintf("%s.via[%d]", prefix, j), state, false)...)
 		}
-		for j, image := range p.Via {
-			if strings.TrimSpace(image) == "" {
-				errs = append(errs, fmt.Errorf("%s.via[%d] must not be empty", prefix, j))
-			}
-		}
-		shapes := 0
-		if strings.TrimSpace(p.To.Image) != "" {
-			shapes++
-		}
-		if p.To.Build != nil {
-			shapes++
-			if strings.TrimSpace(p.To.Build.Service) == "" {
-				errs = append(errs, fmt.Errorf("%s.to.build.service is required", prefix))
-			} else if p.To.Build.Service != c.Compose.Service {
-				errs = append(errs, fmt.Errorf("%s.to.build.service must equal compose.service %q", prefix, c.Compose.Service))
-			}
-		}
-		if shapes != 1 {
-			errs = append(errs, fmt.Errorf("%s.to must define exactly one of image or build", prefix))
-		}
+		errs = append(errs, validateReleaseState(prefix+".to", p.To, true)...)
 	}
 	if c.Health.Type != "http" {
 		errs = append(errs, errors.New("health.type must be http"))
@@ -196,6 +171,48 @@ func (c *Config) Validate(baseDir string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func validateReleaseState(prefix string, state ReleaseState, allowBuild bool) []error {
+	var errs []error
+	if len(state.Env) == 0 {
+		errs = append(errs, fmt.Errorf("%s.env must contain at least one variable", prefix))
+	}
+	for key, value := range state.Env {
+		if strings.TrimSpace(key) == "" || strings.Contains(key, "=") {
+			errs = append(errs, fmt.Errorf("%s.env contains invalid variable name %q", prefix, key))
+		}
+		if strings.HasPrefix(strings.ToUpper(key), "UPGRADEPROOF_") {
+			errs = append(errs, fmt.Errorf("%s.env variable %q uses reserved UPGRADEPROOF_ prefix", prefix, key))
+		}
+		if strings.TrimSpace(value) == "" {
+			errs = append(errs, fmt.Errorf("%s.env.%s must not be empty", prefix, key))
+		}
+	}
+	if state.Build == nil {
+		return errs
+	}
+	if !allowBuild {
+		errs = append(errs, fmt.Errorf("%s.build is only allowed for a target release state", prefix))
+	}
+	if len(state.Build.Services) == 0 {
+		errs = append(errs, fmt.Errorf("%s.build.services must contain at least one service", prefix))
+	}
+	seen := map[string]bool{}
+	for i, service := range state.Build.Services {
+		if strings.TrimSpace(service) == "" {
+			errs = append(errs, fmt.Errorf("%s.build.services[%d] must not be empty", prefix, i))
+		} else if seen[service] {
+			errs = append(errs, fmt.Errorf("%s.build.services contains duplicate %q", prefix, service))
+		}
+		seen[service] = true
+	}
+	if strings.TrimSpace(state.Build.TagEnv) == "" {
+		errs = append(errs, fmt.Errorf("%s.build.tag_env is required", prefix))
+	} else if _, ok := state.Env[state.Build.TagEnv]; !ok {
+		errs = append(errs, fmt.Errorf("%s.build.tag_env %q must be declared in env", prefix, state.Build.TagEnv))
+	}
+	return errs
 }
 
 func (c *Config) SelectPath(name string) ([]Path, error) {

@@ -20,12 +20,12 @@ func (e *ViolationError) Unwrap() error { return ErrViolation }
 
 func IsViolation(err error) bool { return errors.Is(err, ErrViolation) }
 
-func CheckCompose(data []byte, imageService string) error {
+func CheckCompose(data []byte, _ ...string) error {
 	var root map[string]any
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("parse compose file: %w", err)
 	}
-	return auditModel(root, imageService, true, false)
+	return auditModel(root, false)
 }
 
 // CheckResolvedCompose audits the final model produced by
@@ -33,42 +33,32 @@ func CheckCompose(data []byte, imageService string) error {
 // applied include, extends, merge, path resolution, and interpolation, while
 // --no-normalize avoids generated project-scoped volume names being mistaken
 // for user-supplied volume.name declarations.
-func CheckResolvedCompose(data []byte, imageService string) error {
+func CheckResolvedCompose(data []byte, _ ...string) error {
 	var root map[string]any
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("parse resolved Compose model: %w", err)
 	}
-	return auditModel(root, imageService, false, false)
+	return auditModel(root, false)
 }
 
 // CheckCanonicalCompose audits Compose's fully normalized canonical model. A
 // volume name is accepted only when it is the exact project-scoped name that
 // Compose generated from the model's project and logical volume names. The
 // companion non-normalized audit still rejects user-supplied name semantics.
-func CheckCanonicalCompose(data []byte, imageService string) error {
+func CheckCanonicalCompose(data []byte, _ ...string) error {
 	var root map[string]any
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("parse canonical Compose model: %w", err)
 	}
-	return auditModel(root, imageService, false, true)
+	return auditModel(root, true)
 }
 
-func auditModel(root map[string]any, imageService string, requireImageInterpolation, allowGeneratedVolumeNames bool) error {
+func auditModel(root map[string]any, allowGeneratedVolumeNames bool) error {
 	var problems []error
 	services, ok := stringMap(root["services"])
 	if !ok || len(services) == 0 {
 		return errors.New("compose file has no services")
 	}
-	selected, ok := stringMap(services[imageService])
-	if !ok {
-		problems = append(problems, fmt.Errorf("compose service %q does not exist", imageService))
-	} else if requireImageInterpolation {
-		image, _ := selected["image"].(string)
-		if !strings.Contains(image, "${UPGRADEPROOF_IMAGE") && !strings.Contains(image, "$UPGRADEPROOF_IMAGE") {
-			problems = append(problems, fmt.Errorf("service %q image must interpolate UPGRADEPROOF_IMAGE", imageService))
-		}
-	}
-
 	for serviceName, raw := range services {
 		service, ok := stringMap(raw)
 		if !ok {
@@ -104,7 +94,7 @@ func auditModel(root map[string]any, imageService string, requireImageInterpolat
 				problems = append(problems, fmt.Errorf("volume %q has explicit name or non-project-scoped name %q", name, explicit))
 			}
 		}
-		if driver, ok := volume["driver"].(string); ok && strings.TrimSpace(driver) != "" {
+		if driver, ok := volume["driver"].(string); ok && strings.TrimSpace(driver) != "" && !strings.EqualFold(strings.TrimSpace(driver), "local") {
 			problems = append(problems, fmt.Errorf("volume %q uses custom volume driver %q; ownership cannot be proven", name, driver))
 		}
 		if opts, ok := stringMap(volume["driver_opts"]); ok && len(opts) > 0 {

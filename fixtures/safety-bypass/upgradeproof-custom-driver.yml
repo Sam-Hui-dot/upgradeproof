@@ -1,6 +1,6 @@
-version: 1
-compose: {file: compose-custom-driver.yml, service: app, image_env: UPGRADEPROOF_IMAGE}
-paths: [{name: reject, from: example/app:v1, to: {image: example/app:v2}}]
+version: 2
+compose: {file: compose-custom-driver.yml}
+paths: [{name: reject, from: {env: {APP_TAG: v1}}, to: {env: {APP_TAG: v2}}}]
 health: {type: http, url: http://127.0.0.1:1/health, timeout: 1s, interval: 100ms}
 seed: {command: "true", timeout: 1s}
 verify: {checks: [{name: unused, command: "true", timeout: 1s}]}
