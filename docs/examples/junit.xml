@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="upgradeproof" tests="1" failures="1">
+  <testsuite name="broken-target-is-detected" tests="1" failures="1">
+    <testcase name="state-value-preserved" classname="upgradeproof.broken-target-is-detected" time="0.100">
+      <failure message="exit status 1">exit_code=1 stdout=.upgradeproof/example/verify-state-value-preserved.stdout stderr=.upgradeproof/example/verify-state-value-preserved.stderr</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

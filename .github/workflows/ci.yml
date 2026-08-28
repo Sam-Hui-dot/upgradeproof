@@ -1,0 +1,42 @@
+name: validation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core-and-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Gofmt check
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Unit tests
+        run: go test ./...
+      - name: Race tests
+        run: go test -race ./...
+      - name: Build CLI
+        run: go build -o upgradeproof ./cmd/upgradeproof
+      - name: Fixture A - file state
+        run: sh fixtures/file-state/run-fixture.sh "$PWD/upgradeproof"
+      - name: Fixture B - broken upgrade detection
+        run: sh fixtures/broken-upgrade/run-fixture.sh "$PWD/upgradeproof"
+      - name: Fixture C - PostgreSQL Compose
+        run: sh fixtures/postgres-compose/run-fixture.sh "$PWD/upgradeproof"
+      - name: Upload fixture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgradeproof-fixture-evidence
+          path: fixtures/*/.artifacts/
+          if-no-files-found: warn

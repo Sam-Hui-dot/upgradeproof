@@ -1,0 +1,14 @@
+services:
+  app:
+    image: ${UPGRADEPROOF_IMAGE}
+    build:
+      context: ./app
+      args:
+        APP_VERSION: target
+    ports:
+      - "18081:8080"
+    volumes:
+      - app-data:/data
+
+volumes:
+  app-data:

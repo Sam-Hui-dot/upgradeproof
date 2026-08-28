@@ -1,0 +1,24 @@
+version: 1
+compose:
+  file: compose.upgrade.yml
+  service: app
+  image_env: UPGRADEPROOF_IMAGE
+paths:
+  - name: app-v1-to-target-with-postgres
+    from: upgradeproof-fixture-postgres:v1
+    to:
+      build:
+        service: app
+health:
+  type: http
+  url: http://127.0.0.1:18083/health
+  timeout: 90s
+  interval: 1s
+seed:
+  command: ./upgrade-tests/seed.sh
+  timeout: 30s
+verify:
+  checks:
+    - name: relational-user-preserved
+      command: ./upgrade-tests/check-user.sh
+      timeout: 30s

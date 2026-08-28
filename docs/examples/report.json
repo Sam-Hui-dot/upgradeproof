@@ -1,0 +1,65 @@
+{
+  "tool_version": "dev",
+  "run_id": "20260828t120000-a1b2c3d4e5f6",
+  "started_at": "2026-08-28T12:00:00Z",
+  "finished_at": "2026-08-28T12:00:08Z",
+  "config_path": "/workspace/upgradeproof.yml",
+  "overall_status": "failed",
+  "paths": [
+    {
+      "name": "broken-target-is-detected",
+      "status": "failed",
+      "steps": [
+        {
+          "name": "VERIFY",
+          "started_at": "2026-08-28T12:00:07Z",
+          "finished_at": "2026-08-28T12:00:07.1Z",
+          "duration": "100ms",
+          "status": "failed",
+          "error": "one or more invariants failed"
+        }
+      ],
+      "hooks": [
+        {
+          "name": "seed",
+          "status": "passed",
+          "started_at": "2026-08-28T12:00:03Z",
+          "finished_at": "2026-08-28T12:00:03.1Z",
+          "duration": "100ms",
+          "exit_code": 0,
+          "stdout_path": ".upgradeproof/example/seed.stdout",
+          "stderr_path": ".upgradeproof/example/seed.stderr"
+        }
+      ],
+      "checks": [
+        {
+          "name": "state-value-preserved",
+          "status": "failed",
+          "started_at": "2026-08-28T12:00:07Z",
+          "finished_at": "2026-08-28T12:00:07.1Z",
+          "duration": "100ms",
+          "exit_code": 1,
+          "stdout_path": ".upgradeproof/example/verify-state-value-preserved.stdout",
+          "stderr_path": ".upgradeproof/example/verify-state-value-preserved.stderr",
+          "error": "exit status 1"
+        }
+      ],
+      "requested_images": [
+        "upgradeproof-fixture-broken:v1",
+        "build:app"
+      ],
+      "resolved_images": [
+        {
+          "requested": "upgradeproof-fixture-broken:v1",
+          "resolved": "sha256:source-image-id"
+        },
+        {
+          "requested": "build:app",
+          "resolved": "sha256:target-image-id"
+        }
+      ],
+      "project_name": "upgradeproof-broken-upgrade-broken-target-a1b2c3",
+      "artifact_directory": ".upgradeproof/example"
+    }
+  ]
+}

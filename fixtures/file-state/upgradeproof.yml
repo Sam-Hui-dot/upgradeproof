@@ -1,0 +1,26 @@
+version: 1
+compose:
+  file: compose.upgrade.yml
+  service: app
+  image_env: UPGRADEPROOF_IMAGE
+paths:
+  - name: v1-via-v2-to-target
+    from: upgradeproof-fixture-file:v1
+    via:
+      - upgradeproof-fixture-file:v2
+    to:
+      build:
+        service: app
+health:
+  type: http
+  url: http://127.0.0.1:18081/health
+  timeout: 60s
+  interval: 1s
+seed:
+  command: ./upgrade-tests/seed.sh
+  timeout: 30s
+verify:
+  checks:
+    - name: file-state-preserved
+      command: ./upgrade-tests/check-state.sh
+      timeout: 30s

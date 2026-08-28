@@ -1,0 +1,6 @@
+/upgradeproof
+/.upgradeproof/
+/fixtures/*/.artifacts/
+*.exe
+*.test
+coverage.out
