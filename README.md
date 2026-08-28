@@ -1,6 +1,6 @@
 # UpgradeProof
 
-**Status: experimental / validation phase**
+**Status: Experimental / Validation Phase**
 
 UpgradeProof tests stateful Docker Compose upgrade paths rather than fresh installs. A historical release starts first, repository-owned hooks seed real state, the selected application service is recreated through every declared intermediate image and target, and repository-owned checks assert the invariants that must survive.
 
