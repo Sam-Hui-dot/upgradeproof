@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -34,7 +34,7 @@ jobs:
           mkdir release-smoke
           tar -xzf dist/upgradeproof_v0.1.0_linux_amd64.tar.gz -C release-smoke
           test "$(release-smoke/upgradeproof version | cut -d' ' -f2)" = "v0.1.0"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: upgradeproof-v0.1.0-rc-artifacts
           path: dist/*
@@ -45,8 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: upgradeproof-v0.1.0-rc-artifacts
           path: rc-dist
@@ -94,7 +94,7 @@ jobs:
           python3 -c 'import glob,json; p=glob.glob("fixtures/broken-upgrade/.action-artifacts-b/*/report.json"); assert p; r=json.load(open(p[-1])); assert r["overall_status"] == "failed"; assert r["paths"][0]["checks"][0]["status"] == "failed"'
       - name: Upload Action evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: upgradeproof-action-self-test-evidence
           path: fixtures/*/.action-artifacts-*/

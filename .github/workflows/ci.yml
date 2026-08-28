@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -38,7 +38,7 @@ jobs:
         run: sh fixtures/postgres-compose/run-fixture.sh "$PWD/upgradeproof"
       - name: Upload fixture evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: upgradeproof-fixture-evidence
           path: fixtures/*/.artifacts/
