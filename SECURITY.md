@@ -1,6 +1,6 @@
 # Security policy
 
-UpgradeProof is experimental and no public release has been published yet. After v0.1.0, security fixes will target the latest v0.1.x release; unreleased commits and older v0.1.x versions may be asked to reproduce on the latest supported patch.
+UpgradeProof is experimental. Security fixes target the latest v0.1.x release; reports against unreleased commits or older v0.1.x versions may be asked to reproduce on the latest supported patch.
 
 Please report suspected vulnerabilities through GitHub's private vulnerability reporting for `Sam-Hui-dot/upgradeproof`. Do not include credentials, production data, or other secrets in an issue, fixture, report bundle, or Compose log.
 

@@ -16,11 +16,11 @@ Release v2
 verify
 ```
 
-**Status: Experimental public tool / v0.1.0 release candidate.** No release has been published yet. Linux is the validated execution environment; macOS and Windows binaries are cross-compiled but are not described as battle-tested.
+**Status: Experimental public tool. Current release line: v0.1.x.** Linux is the validated execution environment; macOS and Windows binaries are cross-compiled but are not described as battle-tested.
 
 ## GitHub Action quick start
 
-After the `v0.1.0` tag and Release are published, a repository can run:
+Use the versioned Action in a repository workflow:
 
 ```yaml
 - uses: Sam-Hui-dot/upgradeproof@v0.1.0
@@ -91,7 +91,7 @@ upgradeproof test [-c upgradeproof.yml] [--path name] [--keep-on-failure] [--rep
 upgradeproof version
 ```
 
-Once `v0.1.0` is published, Go users can install the command directly:
+Go users can install the command directly:
 
 ```sh
 go install github.com/Sam-Hui-dot/upgradeproof/cmd/upgradeproof@v0.1.0
